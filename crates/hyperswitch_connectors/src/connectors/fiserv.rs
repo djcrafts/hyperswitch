@@ -38,13 +38,13 @@ use hyperswitch_interfaces::{
     types, webhooks,
 };
 use masking::{ExposeInterface, Mask, PeekInterface};
-use ring::hmac;
 use time::OffsetDateTime;
 use transformers as fiserv;
 use uuid::Uuid;
 
 use crate::{
     constants::headers,
+    crypto_utils,
     types::ResponseRouterData,
     utils::{construct_not_implemented_error_report, convert_amount},
 };
@@ -74,9 +74,13 @@ impl Fiserv {
         } = auth;
         let raw_signature = format!("{}{request_id}{timestamp}{payload}", api_key.peek());
 
-        let key = hmac::Key::new(hmac::HMAC_SHA256, api_secret.expose().as_bytes());
-        let signature_value = common_utils::consts::BASE64_ENGINE
-            .encode(hmac::sign(&key, raw_signature.as_bytes()).as_ref());
+        // Use crypto_utils instead of direct hmac implementation
+        let signature_value = crypto_utils::generate_hmac_sha256_base64_signature(
+            raw_signature.as_bytes(),
+            api_secret.expose().as_bytes(),
+        )
+        .change_context(errors::ConnectorError::RequestEncodingFailed)?;
+        
         Ok(signature_value)
     }
 }

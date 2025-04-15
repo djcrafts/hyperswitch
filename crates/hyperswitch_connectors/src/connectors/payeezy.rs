@@ -42,11 +42,13 @@ use hyperswitch_interfaces::{
 };
 use masking::{ExposeInterface, Mask};
 use rand::distributions::DistString;
-use ring::hmac;
 use transformers as payeezy;
 
 use crate::{
-    constants::headers, types::ResponseRouterData, utils::construct_not_implemented_error_report,
+    constants::headers,
+    crypto_utils,
+    types::ResponseRouterData,
+    utils::construct_not_implemented_error_report,
 };
 
 #[derive(Debug, Clone)]
@@ -81,10 +83,16 @@ where
                 )
             },
         );
-        let key = hmac::Key::new(hmac::HMAC_SHA256, auth.api_secret.expose().as_bytes());
-        let tag = hmac::sign(&key, signature_string.expose().as_bytes());
-        let hmac_sign = hex::encode(tag);
+        
+        // Use crypto_utils instead of direct hmac implementation
+        let hmac_sign = crypto_utils::generate_hmac_sha256_hex_signature(
+            signature_string.expose().as_bytes(),
+            auth.api_secret.expose().as_bytes(),
+        )
+        .change_context(errors::ConnectorError::RequestEncodingFailed)?;
+        
         let signature_value = common_utils::consts::BASE64_ENGINE_URL_SAFE.encode(hmac_sign);
+        
         Ok(vec![
             (
                 headers::CONTENT_TYPE.to_string(),

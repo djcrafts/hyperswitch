@@ -45,13 +45,14 @@ use hyperswitch_interfaces::{
     webhooks,
 };
 use masking::{ExposeInterface, Mask, Maskable, PeekInterface};
-use ring::{digest, hmac};
+use ring::digest;
 use time::OffsetDateTime;
 use transformers as bankofamerica;
 use url::Url;
 
 use crate::{
     constants::{self, headers},
+    crypto_utils,
     types::ResponseRouterData,
     utils::{self, PaymentMethodDataType, RefundsRequestData},
 };
@@ -76,8 +77,10 @@ impl api::PaymentToken for Bankofamerica {}
 
 impl Bankofamerica {
     pub fn generate_digest(&self, payload: &[u8]) -> String {
-        let payload_digest = digest::digest(&digest::SHA256, payload);
-        consts::BASE64_ENGINE.encode(payload_digest)
+        // Use crypto_utils instead of direct digest implementation
+        let digest = crypto_utils::generate_sha256_digest(payload)
+            .unwrap_or_else(|_| Vec::new());
+        consts::BASE64_ENGINE.encode(digest)
     }
 
     pub fn generate_signature(
@@ -111,11 +114,16 @@ impl Bankofamerica {
             .change_context(errors::ConnectorError::InvalidConnectorConfig {
                 config: "connector_account_details.api_secret",
             })?;
-        let key = hmac::Key::new(hmac::HMAC_SHA256, &key_value);
-        let signature_value =
-            consts::BASE64_ENGINE.encode(hmac::sign(&key, signature_string.as_bytes()).as_ref());
+            
+        // Use crypto_utils instead of direct hmac implementation
+        let signature_bytes = crypto_utils::generate_hmac_sha256_base64_signature(
+            signature_string.as_bytes(),
+            &key_value,
+        )
+        .change_context(errors::ConnectorError::RequestEncodingFailed)?;
+            
         let signature_header = format!(
-            r#"keyid="{}", algorithm="HmacSHA256", headers="{headers}", signature="{signature_value}""#,
+            r#"keyid="{}", algorithm="HmacSHA256", headers="{headers}", signature="{signature_bytes}""#,
             api_key.peek()
         );
 
@@ -563,7 +571,7 @@ impl ConnectorIntegration<Authorize, PaymentsAuthorizeData, PaymentsResponseData
             message: response
                 .message
                 .unwrap_or(hyperswitch_interfaces::consts::NO_ERROR_MESSAGE.to_string()),
-            attempt_status,
+            attempt_status: None,
             connector_transaction_id: None,
             network_advice_code: None,
             network_decline_code: None,

@@ -53,6 +53,7 @@ use transformers as rapyd;
 
 use crate::{
     constants::headers,
+    crypto_utils,
     types::ResponseRouterData,
     utils::{self, convert_amount, get_header_key_value},
 };
@@ -87,9 +88,14 @@ impl Rapyd {
             access_key.peek(),
             secret_key.peek()
         );
-        let key = hmac::Key::new(hmac::HMAC_SHA256, secret_key.peek().as_bytes());
-        let tag = hmac::sign(&key, to_sign.as_bytes());
-        let hmac_sign = hex::encode(tag);
+        
+        // Use the crypto_utils module instead of direct HMAC implementation
+        let hmac_sign = crypto_utils::generate_hmac_sha256_signature(
+            to_sign.as_bytes(),
+            secret_key.peek().as_bytes(),
+        )
+        .change_context(errors::ConnectorError::RequestEncodingFailed)?;
+        
         let signature_value = BASE64_ENGINE_URL_SAFE.encode(hmac_sign);
         Ok(signature_value)
     }
@@ -817,9 +823,14 @@ impl IncomingWebhook for Rapyd {
             .parse_struct("RapydAuthType")
             .change_context(errors::ConnectorError::WebhookSourceVerificationFailed)?;
         let secret_key = auth.secret_key;
-        let key = hmac::Key::new(hmac::HMAC_SHA256, secret_key.peek().as_bytes());
-        let tag = hmac::sign(&key, &message);
-        let hmac_sign = hex::encode(tag);
+        
+        // Use crypto_utils instead of direct hmac implementation
+        let hmac_sign = crypto_utils::generate_hmac_sha256_signature(
+            &message,
+            secret_key.peek().as_bytes(),
+        )
+        .change_context(errors::ConnectorError::WebhookSourceVerificationFailed)?;
+        
         Ok(hmac_sign.as_bytes().eq(&signature))
     }
 

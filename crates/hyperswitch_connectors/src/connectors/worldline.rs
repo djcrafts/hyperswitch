@@ -48,13 +48,12 @@ use hyperswitch_interfaces::{
 };
 use lazy_static::lazy_static;
 use masking::{ExposeInterface, Mask, PeekInterface};
-use ring::hmac;
-use router_env::logger;
 use time::{format_description, OffsetDateTime};
 use transformers as worldline;
 
 use crate::{
     constants::headers,
+    crypto_utils,
     types::ResponseRouterData,
     utils::{self, RefundsRequestData as _},
 };
@@ -83,8 +82,13 @@ impl Worldline {
             api_secret,
             ..
         } = auth;
-        let key = hmac::Key::new(hmac::HMAC_SHA256, api_secret.expose().as_bytes());
-        let signed_data = consts::BASE64_ENGINE.encode(hmac::sign(&key, signature_data.as_bytes()));
+        
+        // Use crypto_utils instead of direct hmac implementation
+        let signed_data = crypto_utils::generate_hmac_sha256_base64_signature(
+            signature_data.as_bytes(),
+            api_secret.expose().as_bytes(),
+        )
+        .change_context(errors::ConnectorError::RequestEncodingFailed)?;
 
         Ok(format!("GCS v1HMAC:{}:{signed_data}", api_key.peek()))
     }
